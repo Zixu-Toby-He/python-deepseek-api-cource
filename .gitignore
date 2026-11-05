@@ -218,3 +218,97 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# -----------------------------------------------------------------------------
+# 本课程项目：LaTeX / Beamer 编译中间文件
+# 保留课件源码 *.tex 和交付用 main.pdf，仅忽略可重新生成的辅助文件。
+# -----------------------------------------------------------------------------
+*.acn
+*.acr
+*.alg
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.cb
+*.cb2
+*.dvi
+*.fdb_latexmk
+*.fls
+*.fmt
+*.fot
+*.glg
+*.glo
+*.gls
+*.idx
+*.ilg
+*.ind
+*.ist
+*.loa
+*.lof
+*.log
+*.lot
+*.nav
+*.nlo
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.xdv
+*.xdy
+
+# LaTeX 编辑器和构建工具的本地目录
+_minted-*/
+*.pyg
+*.pygtex
+.auctex-auto/
+.latexmk/
+
+# -----------------------------------------------------------------------------
+# 本地验证、临时输出和崩溃文件
+# -----------------------------------------------------------------------------
+.validation-*/
+*.bak
+*.orig
+*.rej
+*.stackdump
+*.temp
+*.tmp
+*~
+
+# -----------------------------------------------------------------------------
+# 本地密钥和机器专用配置
+# 示例模板可以提交，真实凭据不得进入版本库。
+# -----------------------------------------------------------------------------
+.env.*
+!.env.example
+!.env.template
+.secrets/
+secrets.local.*
+credentials.local.*
+
+# -----------------------------------------------------------------------------
+# 操作系统和编辑器元数据
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+.idea/
+.vscode/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+
+# 其他 Python 工具缓存
+.pyright/
+.pytype/
+.basedpyright/

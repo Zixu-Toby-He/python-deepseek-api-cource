@@ -1,0 +1,122 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第5课：结构化输出与补全能力}
+\subtitle{JSON Output、对话前缀续写与 FIM}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 生成可解析 JSON 并处理空白/截断
+  \item 用 assistant 前缀约束回答开头
+  \item 用 FIM 补全代码中间部分
+  \item 认识 logprobs、Beta 地址和能力边界
+\end{itemize}
+\end{frame}
+\section{JSON Output}
+\begin{frame}{开启 JSON 模式}
+设置 \api{response\_format=\{"type":"json\_object"\}}，并在 system 或 user 提示中明确包含“JSON”字样及目标结构示例。\\[8pt]
+API 保证输出是合法 JSON 字符串，但\keypoint{不保证字段满足业务语义}；仍需客户端 Schema 校验。
+\end{frame}
+\begin{frame}[fragile]{结构化请求}
+\begin{lstlisting}[language=Python]
+response = client.chat.completions.create(
+  model="deepseek-flash",
+  messages=[
+    {"role": "system", "content":
+      "输出 JSON：{\"name\": str, \"score\": int}"},
+    {"role": "user", "content": "小明得 95 分"},
+  ],
+  response_format={"type": "json_object"},
+  max_tokens=200,
+)
+data = json.loads(response.choices[0].message.content)
+\end{lstlisting}
+\end{frame}
+\begin{frame}{四层校验}
+\begin{enumerate}
+  \item \api{finish\_reason != length}
+  \item content 非空且不是纯空格
+  \item \api{json.loads} 成功
+  \item 业务 Schema：必填字段、类型、范围、枚举
+\end{enumerate}
+失败时缩短输入/扩大预算、改进示例后有限重试；不要无限重试同一提示。
+\end{frame}
+\begin{frame}{特殊空白行为}
+若模型输出无法识别为 JSON，API 会把非 JSON 内容替换为 U+0020 空格；content 看似为空，但 finish reason 仍可能为 stop。\\[8pt]
+因此 \api{if not content.strip()} 是必需的防线。
+\end{frame}
+\section{对话前缀续写}
+\begin{frame}{Prefix Completion（Beta）}
+\begin{itemize}
+  \item 沿用 Chat Completions
+  \item base URL 改为 \api{https://api.deepseek.com/beta}
+  \item 最后一条必须是 assistant 消息
+  \item 该消息设置 \api{prefix=True}
+\end{itemize}
+用于强制代码围栏、固定措辞开头或模板续写。
+\end{frame}
+\begin{frame}[fragile]{前缀 + stop}
+\begin{lstlisting}[language=Python]
+messages = [
+  {"role": "user", "content": "写快速排序"},
+  {"role": "assistant", "content": "```python\n",
+   "prefix": True},
+]
+response = client.chat.completions.create(
+  model="deepseek-flash", messages=messages,
+  stop=["```"],
+)
+\end{lstlisting}
+前缀只是生成约束，不是代码安全沙箱。
+\end{frame}
+\section{FIM 补全}
+\begin{frame}{Fill In the Middle（Beta）}
+FIM 使用 \api{POST /beta/completions}：\api{prompt} 是前缀，\api{suffix} 是后缀，模型生成中间内容。适合 IDE 补全和局部模板填充。\\[8pt]
+最大补全长度为 4K；仅非思考模式支持。
+\end{frame}
+\begin{frame}{Completion 参数与响应}
+\begin{itemize}
+  \item 输入：model、prompt、suffix、max\_tokens、stop
+  \item 可选：echo、logprobs、temperature、top\_p、stream
+  \item 输出文本：\api{choices[0].text}
+  \item 用量结构与 Chat 类似，含缓存明细
+\end{itemize}
+\end{frame}
+\begin{frame}{FIM 上下文设计}
+\begin{itemize}
+  \item 前后缀应保留函数签名、缩进、类型与邻近依赖
+  \item stop 阻止越界生成到下一函数/围栏
+  \item 生成代码必须格式化、静态检查、测试后再采用
+  \item 不把仓库密钥或无关私有代码发送给模型
+\end{itemize}
+\end{frame}
+\section{概率与选择}
+\begin{frame}{什么时候用哪一种}
+\begin{tabular}{ll}
+\toprule
+目标 & 能力\\
+\midrule
+可靠机器读取 & JSON Output + 本地 Schema 校验\\
+固定回答开头 & Chat Prefix（Beta）\\
+补全中间代码 & FIM（Beta）\\
+观察候选 Token & logprobs / top\_logprobs\\
+\bottomrule
+\end{tabular}
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_json\_output.py}：解析与兜底
+  \item \api{02\_prefix\_completion.py}：代码前缀续写
+  \item \api{03\_fim\_completion.py}：中间补全
+\end{enumerate}
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/guides/json_mode}\\
+\url{https://api-docs.deepseek.com/zh-cn/guides/chat_prefix_completion}\\
+\url{https://api-docs.deepseek.com/zh-cn/guides/fim_completion}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/create-completion}
+\end{frame}
+\end{document}

@@ -1,0 +1,33 @@
+\usetheme{Madrid}
+\usecolortheme{default}
+\definecolor{DeepBlue}{HTML}{2563EB}
+\definecolor{DeepInk}{HTML}{172033}
+\definecolor{DeepGreen}{HTML}{059669}
+\setbeamercolor{structure}{fg=DeepBlue}
+\setbeamercolor{title}{fg=white,bg=DeepBlue}
+\setbeamercolor{frametitle}{fg=white,bg=DeepBlue}
+\setbeamercolor{alerted text}{fg=DeepGreen}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,urlcolor=DeepBlue}
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{DeepBlue},
+  stringstyle=\color{DeepGreen},
+  commentstyle=\color{gray},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible
+}
+\newcommand{\api}[1]{\texttt{#1}}
+\newcommand{\keypoint}[1]{\alert{#1}}
+\AtBeginSection[]{
+  \begin{frame}{本节路线}
+    \tableofcontents[currentsection]
+  \end{frame}
+}

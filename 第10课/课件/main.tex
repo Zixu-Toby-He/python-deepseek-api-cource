@@ -1,0 +1,113 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第10课：Responses API}
+\subtitle{Items、语义流事件与 Codex 兼容}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 用 Responses API 完成文本与图片输入
+  \item 理解 input/output items 和语义化流事件
+  \item 完成 function call 的无状态回传
+  \item 区分完整支持、部分支持、忽略与不支持字段
+\end{itemize}
+\end{frame}
+\section{请求与响应}
+\begin{frame}{最小调用}
+\api{client.responses.create(model, instructions, input)}；\api{input} 与 \api{instructions} 至少提供一个。最终文本可从 \api{response.output\_text} 读取。\\[8pt]
+base URL 仍为 \api{https://api.deepseek.com}。
+\end{frame}
+\begin{frame}{为什么是 Items}
+Responses 不只输出消息，而是有序 output item：reasoning、message、function\_call、custom\_tool\_call、web\_search\_call 等。\\[8pt]
+多轮仍是无状态的：需要把先前相关 items 与工具结果重新放入 input。
+\end{frame}
+\begin{frame}{输入 item 支持}
+\small
+\begin{itemize}
+  \item message：user/assistant/system/developer；文本与 input\_image
+  \item function\_call / function\_call\_output
+  \item reasoning：明文 content；summary/encrypted\_content 不支持
+  \item custom\_tool\_call/output：仅配合 apply\_patch
+  \item 其他类型通常忽略
+\end{itemize}
+developer 在兼容层视同 user；文件输入不支持。
+\end{frame}
+\begin{frame}[fragile]{最小 Python}
+\begin{lstlisting}[language=Python]
+response = client.responses.create(
+  model="deepseek-flash",
+  instructions="回答简洁。",
+  input="什么是 Responses API？",
+  reasoning={"effort": "none"},
+  max_output_tokens=300,
+)
+print(response.output_text)
+\end{lstlisting}
+\end{frame}
+\section{语义化流}
+\begin{frame}{与 Chat SSE 的差别}
+Responses 事件有 \api{type} 和递增 \api{sequence\_number}；以 response.completed/incomplete/failed 结束，\keypoint{没有 data: [DONE]}。\\[8pt]
+只在 completed 才视为正常完成；incomplete 常见于输出预算不足。
+\end{frame}
+\begin{frame}{关键事件}
+\small
+\begin{itemize}
+  \item response.created / in\_progress
+  \item response.output\_item.added/done
+  \item response.reasoning\_text.delta/done
+  \item response.output\_text.delta/done
+  \item response.function\_call\_arguments.delta/done
+  \item response.completed / incomplete / failed
+\end{itemize}
+最终事件中的 response 携带完整 usage。
+\end{frame}
+\section{工具与视觉}
+\begin{frame}{工具支持矩阵}
+\begin{itemize}
+  \item function：支持
+  \item custom：仅 name=apply\_patch，用于 Codex
+  \item web\_search：仅 Pro 服务端执行；Flash 忽略
+  \item file\_search、code\_interpreter、computer\_use、mcp：忽略
+\end{itemize}
+parallel\_tool\_calls 被忽略，实际始终允许并行。
+\end{frame}
+\begin{frame}{function 回传}
+响应的 function\_call 含 call\_id、name、arguments；执行后把 \api{function\_call\_output}（同 call\_id）加入下一次 input。\\[8pt]
+依然需要白名单、参数校验、权限、超时和最大循环步数。
+\end{frame}
+\begin{frame}{图片输入}
+\api{input\_image} 使用 image\_url 或 file\_id（二者互斥），可设 detail。仅 Flash 真正处理；允许出现在 user/developer 或工具输出，system/assistant 中图片返回 400。
+\end{frame}
+\section{兼容边界}
+\begin{frame}{常用支持字段}
+model、input、instructions、stream、temperature、top\_p、max\_output\_tokens、top\_logprobs、tools、tool\_choice、reasoning.effort、text.format、user。
+\end{frame}
+\begin{frame}{部分支持或忽略}
+\begin{itemize}
+  \item reasoning.summary 可传但不生成
+  \item text.verbosity 可传但不生效
+  \item 不支持 previous\_response\_id / conversation：无状态
+  \item store 固定 false；background、metadata、include 等不支持
+  \item truncation 不支持，超上下文返回 400
+  \item 不支持字段多会\keypoint{静默忽略}
+\end{itemize}
+\end{frame}
+\begin{frame}{服务端搜索用量}
+Pro 的 web\_search 由服务端执行并继续生成，无需客户端回传结果。\api{usage.server\_tool\_use} 统计 tool\_search / tool\_fetch；流式时从最终事件读取。\\[8pt]
+服务端搜索同样按成功调用计费。
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_responses\_basic.py}：基础与 reasoning
+  \item \api{02\_responses\_stream.py}：语义流事件
+  \item \api{03\_responses\_tool.py}：function items 循环
+\end{enumerate}
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/guides/responses_api}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/create-response}
+\end{frame}
+\end{document}

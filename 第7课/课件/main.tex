@@ -1,0 +1,157 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第7课：图像理解}
+\subtitle{URL、Base64、OpenCV、文件引用与视觉预算}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 用 URL、Base64、OpenCV 与 file\_id 向模型传图
+  \item 选择 detail 级别并估算图片 Token
+  \item 掌握格式、大小、尺寸、数量与角色限制
+  \item 理解 Chat、Responses、Anthropic 的块结构差异
+\end{itemize}
+\end{frame}
+\section{视觉消息}
+\begin{frame}{模型与格式}
+仅 \api{deepseek-flash} 处理图像；\api{deepseek-v4-pro} 不支持。支持 JPEG、PNG、GIF、WebP，以文件实际内容而非扩展名判断。\\[8pt]
+典型任务：描述、OCR、截图理解、图表分析、视觉问答。
+\end{frame}
+\begin{frame}{OpenAI Chat 内容块}
+user 的 content 从字符串改为数组：
+\begin{itemize}
+  \item \api{\{"type":"text","text":"..."\}}
+  \item \api{\{"type":"image\_url","image\_url":\{...\}\}}
+  \item 或 \api{\{"type":"file","file\_id":"..."\}}
+\end{itemize}
+图片只能出现在 user 消息；system/assistant 携带会返回 400。
+\end{frame}
+\begin{frame}{三种传图方式}
+\begin{tabular}{lll}
+\toprule
+方式 & 优点 & 适用\\
+\midrule
+Base64 data URL & 本地文件直接发送 & 小图、一次性\\
+公开 HTTP(S) URL & 请求体小 & 稳定公开资源\\
+Files API file\_id & 复用、支持更大文件 & 多次请求/大图\\
+\bottomrule
+\end{tabular}
+\end{frame}
+\begin{frame}[fragile]{Base64 内容块}
+\begin{lstlisting}[language=Python]
+b64 = base64.b64encode(path.read_bytes()).decode()
+content = [
+  {"type": "text", "text": "描述图片"},
+  {"type": "image_url", "image_url": {
+    "url": f"data:image/jpeg;base64,{b64}",
+    "detail": "low"
+  }}
+]
+\end{lstlisting}
+内联编码计入 48 MiB 请求体限制。
+\end{frame}
+\begin{frame}{外部 URL 约束}
+URL 最长 8192 字符，图片最大 32 MiB，服务器需在 60 秒内下载完成。URL 必须稳定、可公开访问且返回真正图片。\\[8pt]
+私有 URL 不应通过临时放开权限来迁就模型；改用 Base64 或 Files API。
+\end{frame}
+\section{OpenCV 内存图像}
+\begin{frame}{为什么不能直接发送 ndarray？}
+\api{cv2.imread()} 返回 NumPy BGR 像素矩阵。\api{image.tobytes()} 只是裸像素，不包含 JPEG/PNG 文件头、尺寸、通道与数据类型，不能作为视觉图片直接放进 JSON。\\[8pt]
+正确流程：
+\begin{center}
+ndarray $\rightarrow$ cv2.imencode $\rightarrow$ 图片格式字节 $\rightarrow$ Base64 或 Files API
+\end{center}
+\end{frame}
+\begin{frame}[fragile]{OpenCV 编码后发送}
+\begin{lstlisting}[language=Python]
+成功, 缓冲区 = cv2.imencode(
+    ".jpg", 图片,
+    [cv2.IMWRITE_JPEG_QUALITY, 85],
+)
+if not 成功:
+    raise RuntimeError("图片编码失败")
+图片字节 = 缓冲区.tobytes()
+Base64文本 = base64.b64encode(图片字节).decode("ascii")
+图片地址 = f"data:image/jpeg;base64,{Base64文本}"
+\end{lstlisting}
+OpenCV 的 BGR 矩阵可直接交给 \api{imencode}，无需先转 RGB。
+\end{frame}
+\begin{frame}{编码格式与发送路径}
+\begin{tabular}{lll}
+\toprule
+选择 & 建议场景 & 注意事项\\
+\midrule
+JPEG & 照片、摄像头帧 & 有损；可调质量压缩\\
+PNG & OCR、界面、图表 & 无损；通常体积更大\\
+Base64 & 单次使用 & 体积约增加三分之一\\
+Files API & 多次复用/较大图片 & 上传后需管理生命周期\\
+\bottomrule
+\end{tabular}
+\end{frame}
+\section{细节与 Token}
+\begin{frame}{detail 级别}
+\begin{description}
+  \item[low] 缩放到 512$\times$512，更快省 Token
+  \item[original] 保留原图
+  \item[high] 当前等价于 original
+  \item[auto] 当前等价于 original
+\end{description}
+OCR、小字、密集图表用 original；粗粒度分类/描述先试 low。
+\end{frame}
+\begin{frame}{图片 Token 规则}
+小图保持比例放大到约 544$\times$544；大图缩小到总像素约等于 1300$\times$1300。每张图最多 1024 Token，多图逐张计算。\\[8pt]
+实际以响应 usage 为准；超高分辨率不会无限增加模型可见细节。
+\end{frame}
+\section{完整限制}
+\begin{frame}{大小与数量}
+\small
+\begin{tabular}{ll}
+\toprule
+限制 & 数值\\
+\midrule
+请求体 & 48 MiB\\
+单图 Base64 / URL & 32 MiB\\
+单图 file\_id & 64 MiB\\
+单请求图片数 & 600\\
+图片总大小 & 无 file\_id 64 MiB；含 file\_id 200 MiB\\
+最长边 & 8192 px；15 张及以上时 4096 px\\
+\bottomrule
+\end{tabular}
+\end{frame}
+\begin{frame}{跨 API 的块名}
+\begin{tabular}{lll}
+\toprule
+API & 图片块 & 来源字段\\
+\midrule
+Chat & image\_url / file & url 或 file\_id\\
+Responses & input\_image & image\_url 或 file\_id\\
+Anthropic & image & source: base64/url/file\\
+\bottomrule
+\end{tabular}
+Anthropic 的 file 来源还需 beta 请求头；第8、10、11课展开。
+\end{frame}
+\begin{frame}{提示与验证}
+\begin{itemize}
+  \item 指定关注区域、输出格式与不确定性要求
+  \item OCR 结果应回看原图；关键数据做规则校验
+  \item 模型可能误读细字、遮挡、比例尺或图例
+  \item 人脸、证件、医疗等敏感图片需满足合规要求
+\end{itemize}
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_vision\_base64.py}：本地图片内联
+  \item \api{02\_vision\_url.py}：公开 URL 与 detail
+  \item \api{03\_vision\_opencv.py}：OpenCV 内存编码与两种发送路径
+\end{enumerate}
+第8课继续讲解 file\_id 的查询、分页、过期与删除。
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/guides/vision}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/token_usage}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/create-chat-completion}
+\end{frame}
+\end{document}

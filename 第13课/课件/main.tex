@@ -1,0 +1,106 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第13课：Agent 集成与综合项目}
+\subtitle{从协议选型到可审计研究助手}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 按工具选择 OpenAI、Responses 或 Anthropic 兼容层
+  \item 接入官方文档列出的主流 Agent 工具
+  \item 识别第三方 Agent 的权限、成本与配置风险
+  \item 综合搜索、生成、引用和可观测性完成结课项目
+\end{itemize}
+\end{frame}
+\section{选型与共同原则}
+\begin{frame}{三条接入路线}
+\begin{tabular}{lll}
+\toprule
+路线 & 典型工具 & 地址\\
+\midrule
+Chat Completions & 自研、WorkBuddy & api.deepseek.com\\
+Responses & Codex & api.deepseek.com\\
+Anthropic Messages & Claude Code & api.deepseek.com/anthropic\\
+\bottomrule
+\end{tabular}
+\end{frame}
+\begin{frame}{第三方 Agent 风险}
+Agent 可读写文件、执行命令、联网和调用工具。接入前确认项目可信、沙箱/审批设置、密钥保存位置、模型费用和搜索额外计费；先在临时仓库与低权限环境试用。
+\end{frame}
+\section{编程 Agent}
+\begin{frame}{Claude Code}
+Node.js 18+（Windows 另需 Git），安装 \api{@anthropic-ai/claude-code}。设置 ANTHROPIC\_BASE\_URL、AUTH\_TOKEN、各模型变量、effort=max、自动压缩窗口 786432。\\[8pt]
+内置 Web Search 会同时产生模型 Token 与 Search 费用；claude 模型名按第11课映射。
+\end{frame}
+\begin{frame}{Codex}
+使用 Responses API。官方提供配置脚本，也可手动维护 \api{\textasciitilde/.codex/models.json} 和 \api{config.toml}；脚本会备份、校验并保留 MCP/信任设置。\\[8pt]
+Flash 声明 text+image；Pro 可启用服务端 web search。应审查远程脚本后再运行，并保留恢复路径。
+\end{frame}
+\begin{frame}{OpenCode 与 Reasonix}
+\begin{block}{OpenCode}
+升级到 $\ge$1.18.30，运行 \api{/connect}，选择 deepseek、填写 Key 和 Flash。
+\end{block}
+\begin{block}{Reasonix}
+Node.js $\ge$20.10，\api{npx reasonix code}；向导保存 Key。默认 Flash，\api{/pro} 下一轮用 Pro，\api{/preset max} 整会话用 Pro。
+\end{block}
+\end{frame}
+\begin{frame}{Qoder}
+IDE、CLI、JetBrains 插件均可添加 DeepSeek 自定义模型；CLI 用 \api{/model} 的 Custom 向导，不手改 settings.json。支持 1M 上下文与 max effort。\\[8pt]
+内置模型使用 Qoder Credits；自定义模型直接从 DeepSeek 账户结算。
+\end{frame}
+\begin{frame}{WorkBuddy / CodeBuddy}
+通过用户级或项目级 \api{.codebuddy/models.json} 配置 OpenAI Chat 端点、环境变量 Key、工具与图片能力；文件保存为 UTF-8 无 BOM，完全重启后选择模型。\\[8pt]
+项目级配置不要提交真实 Key。
+\end{frame}
+\section{通用 Agent}
+\begin{frame}{DeepSeek Harness}
+官方文档将 Harness 作为面向全球开发者的预览入口；按独立 Harness 快速入门配置。它强调 Agent/harness 工作流，不是 Chat SDK 的替代概念。\\[8pt]
+预览能力与接口可能快速变化，上线前固定版本并回归测试。
+\end{frame}
+\begin{frame}{OpenClaw}
+通过 \api{openclaw onboard --install-daemon} 进入向导，选择 QuickStart、DeepSeek、Key 与模型；之后可用 dashboard、tui、terminal。\\[8pt]
+接入聊天渠道和 Skill 前先完成多用户锁定、权限与数据边界配置。
+\end{frame}
+\begin{frame}{Hermes}
+安装 Hermes 后运行 \api{hermes setup}，选择 Quick Setup、DeepSeek、\api{https://api.deepseek.com}、Key 和 Pro。安装脚本属于第三方代码，执行前应审查来源和权限。
+\end{frame}
+\section{综合项目}
+\begin{frame}{项目：可审计研究助手}
+\centering
+问题 $\rightarrow$ 规范化查询 $\rightarrow$ Search\\
+$\rightarrow$ 分数/权威性筛选 $\rightarrow$ 编号资料\\
+$\rightarrow$ Chat 回答与逐条引用 $\rightarrow$ 来源清单 + usage 日志
+\end{frame}
+\begin{frame}{验收标准}
+\begin{itemize}
+  \item Key 只来自环境变量
+  \item 无结果时明确停止，不凭空作答
+  \item 网页被视为不可信数据，抵御提示注入
+  \item 每个事实带来源编号，最终返回 URL
+  \item 有超时、错误分类、Token/搜索计数和预算上限
+  \item 可替换为 Responses/Anthropic 而不改变业务层
+\end{itemize}
+\end{frame}
+\begin{frame}{迁移与版本策略}
+模型别名、旧 V4 Flash 显示名和工具配置可能并存；新代码优先 \api{deepseek-flash}/\api{deepseek-v4-pro}。运行时查询 models，锁定客户端版本，关注更新日志并建立协议冒烟测试。
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_protocol\_smoke.py}：Chat/Responses/Anthropic 三协议冒烟
+  \item \api{02\_research\_assistant.py}：带筛选、引用与用量的结课项目
+\end{enumerate}
+\end{frame}
+\begin{frame}{官方资料}
+\scriptsize
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/claude_code}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/opencode}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/openclaw}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/hermes}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/reasonix}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/workbuddy}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/qoder}
+\end{frame}
+\end{document}

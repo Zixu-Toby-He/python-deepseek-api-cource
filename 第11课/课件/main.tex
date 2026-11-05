@@ -1,0 +1,94 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第11课：Anthropic Messages API}
+\subtitle{生态迁移、内容块、工具与流式用量}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 用 Anthropic SDK 调用 DeepSeek
+  \item 理解模型映射与字段兼容性
+  \item 实现 tool\_use / tool\_result 循环
+  \item 正确读取流式事件、缓存与服务端工具用量
+\end{itemize}
+\end{frame}
+\section{接入基础}
+\begin{frame}{地址与鉴权}
+base URL：\api{https://api.deepseek.com/anthropic}。可用 \api{x-api-key} 或 \api{Authorization: Bearer}。\\[8pt]
+Anthropic SDK 要求显式 max\_tokens；裸 HTTP 可省略，由模型/模式决定默认值。
+\end{frame}
+\begin{frame}{模型名映射}
+\begin{itemize}
+  \item claude-opus* $\rightarrow$ deepseek-v4-pro（按 Pro 计费）
+  \item claude-haiku* / claude-sonnet* $\rightarrow$ deepseek-flash
+  \item 直接使用 deepseek-flash / deepseek-v4-pro 最清晰
+  \item 非 claude 前缀的未知模型名返回 400
+\end{itemize}
+映射用于兼容受模型名限制的客户端，不应掩盖真实成本。
+\end{frame}
+\begin{frame}[fragile]{最小调用}
+\begin{lstlisting}[language=Python]
+client = anthropic.Anthropic(
+  api_key=os.environ["DEEPSEEK_API_KEY"],
+  base_url="https://api.deepseek.com/anthropic",
+)
+message = client.messages.create(
+  model="deepseek-flash", max_tokens=500,
+  system="回答简洁。",
+  messages=[{"role":"user", "content":"你好"}],
+)
+\end{lstlisting}
+\end{frame}
+\section{字段兼容}
+\begin{frame}{常用字段}
+system、messages、stop\_sequences、stream 完全支持；metadata 仅 user\_id 生效。thinking 支持 enabled/disabled，adaptive 视为 enabled，budget\_tokens 忽略；output\_config 仅 effort 生效。
+\end{frame}
+\begin{frame}{会被忽略的字段}
+container、mcp\_servers、service\_tier、top\_k、cache\_control、text citations 等被忽略。思考模式 temperature 固定 1；top\_p 行为仍依 Flash/Pro。\\[8pt]
+兼容成功不等于语义完全相同，应建立迁移测试。
+\end{frame}
+\begin{frame}{消息内容块}
+支持 text、thinking、tool\_use、tool\_result、server\_tool\_use、web\_search\_tool\_result；不支持 document、search\_result、redacted\_thinking、MCP/代码执行结果等。\\[8pt]
+Flash 支持 user 和 tool\_result 中的 image；Pro 替换为 \api{[Unsupported Image]}。
+\end{frame}
+\section{工具与思考}
+\begin{frame}{客户端工具定义}
+工具直接提供 name、description、input\_schema，\keypoint{不要给客户端函数传 type=custom}，否则 422。\\[8pt]
+tool\_choice：none/auto 支持；any 按 auto；指定 tool 仅非思考模式支持。
+\end{frame}
+\begin{frame}{回传工具结果}
+assistant 若含 tool\_use，紧接的消息必须是 user，并为所有调用提供匹配 tool\_use\_id 的 tool\_result；该 user 消息中所有 tool\_result 必须放在文本之前。
+\end{frame}
+\begin{frame}{思考工具链}
+建议原样回传 assistant 完整 content 数组（thinking + tool\_use）。服务端有时能按调用 ID 恢复遗漏推理，但无法恢复会 400，\keypoint{不要依赖自动恢复}。
+\end{frame}
+\section{服务端工具与流}
+\begin{frame}{Anthropic 服务端 web search}
+声明 web\_search 服务端工具后，由服务端执行并继续回答，客户端无需 tool\_result。输出含 server\_tool\_use 与 web\_search\_tool\_result。\\[8pt]
+\api{usage.server\_tool\_use} 区分尝试次数 web\_search\_requests 与成功有结果次数 tool\_search。
+\end{frame}
+\begin{frame}{流式事件}
+message\_start $\rightarrow$ content\_block\_start/delta/stop $\rightarrow$ message\_delta $\rightarrow$ message\_stop，期间可有 ping 和保活注释；没有 \api{data: [DONE]}。\\[8pt]
+最终 Token 以 message\_delta.usage 为准，不与 message\_start 相加。
+\end{frame}
+\begin{frame}{Anthropic usage}
+总输入 = input\_tokens + cache\_read\_input\_tokens + cache\_creation\_input\_tokens；当前 cache creation 常为 0。流式中断且未收到 message\_stop，响应不完整。
+\end{frame}
+\begin{frame}{图片与 Files}
+image.source.type 可为 base64、url、file。file 图片和 Anthropic Files API 必须带 \api{anthropic-beta: files-api-2025-04-14}；Files 路径、分页和字段差异见第8课。
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_anthropic\_basic.py}：基础消息与思考控制
+  \item \api{02\_anthropic\_stream.py}：流式文本与最终用量
+  \item \api{03\_anthropic\_tool.py}：工具内容块循环
+\end{enumerate}
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/guides/anthropic_api}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/create-message}
+\end{frame}
+\end{document}

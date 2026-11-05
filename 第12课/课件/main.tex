@@ -1,0 +1,122 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第12课：生产可靠性与成本治理}
+\subtitle{错误、退避、并发、隔离、观测与预算}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 按错误类别设计重试与降级
+  \item 管理并发、超时、取消和 user\_id 隔离
+  \item 建立不泄密的可观测性与成本账本
+  \item 把“能调用”提升为“可安全上线”
+\end{itemize}
+\end{frame}
+\section{错误分类}
+\begin{frame}{核心 HTTP 错误}
+\small
+\begin{tabular}{lll}
+\toprule
+状态 & 原因 & 默认动作\\
+\midrule
+400 & 请求格式 & 修正，不原样重试\\
+401 & Key 无效 & 停止并轮换/修正\\
+402 & 余额不足 & 告警并充值\\
+422 & 参数错误 & 修正字段\\
+429 & 并发/速率上限 & 抖动退避\\
+500/503 & 服务故障/繁忙 & 有界退避\\
+\bottomrule
+\end{tabular}
+\end{frame}
+\begin{frame}{退避公式}
+第 $n$ 次等待可取 $\min(cap, base\times2^n)+random(0,jitter)$。\\[8pt]
+只重试临时错误；设置最大次数和总时限；尊重服务端 Retry-After（若有）；记录最终失败原因。
+\end{frame}
+\begin{frame}{幂等性问题}
+生成请求重试可能产生不同文本和重复费用；工具写操作更可能造成重复副作用。\\[8pt]
+业务层使用请求 ID/幂等键、工具去重、状态机和人工确认。不要把网络重试与业务重试混为一谈。
+\end{frame}
+\section{并发与超时}
+\begin{frame}{当前账号并发上限}
+\begin{tabular}{ll}
+\toprule
+模型 & 官方快照并发\\
+\midrule
+deepseek-flash & 2500\\
+deepseek-v4-pro & 500\\
+\bottomrule
+\end{tabular}
+\vspace{6pt}
+
+一次请求从发出到响应完成持续占用并发；限制按账号而非 API Key。生产端还要设置更低的本地信号量，保护自身资源。
+\end{frame}
+\begin{frame}{user\_id 隔离}
+用于内容安全、KVCache 和调度隔离。建议字符集为字母/数字/下划线/连字符，UTF-8 最多 512 字节，不得放邮箱、手机号等隐私。\\[8pt]
+Chat 放 extra\_body.user\_id；Responses 用 user；Anthropic 用 metadata.user\_id。
+\end{frame}
+\begin{frame}{超时分层}
+\begin{itemize}
+  \item 连接超时：网络/握手
+  \item 首字超时：排队 + 开始推理
+  \item 读取空闲超时：流中断
+  \item 总截止时间：整个业务请求
+  \item 工具自身超时：外部依赖
+\end{itemize}
+服务端会发送空行或 SSE 注释保活；10 分钟未开始推理可能关闭。
+\end{frame}
+\section{可观测性}
+\begin{frame}{结构化日志字段}
+request id、业务 trace id、模型、API 形态、模式/effort、状态码、重试次数、首 Token/总延迟、finish reason、Token 分类、工具次数。\\[8pt]
+默认不记录 Key、完整提示、推理文本、图片或工具敏感参数。
+\end{frame}
+\begin{frame}{四类核心指标}
+\begin{itemize}
+  \item 可靠性：成功率、429/5xx、异常断流、重试耗尽
+  \item 性能：P50/P95 首字与总延迟、工具耗时
+  \item 质量：任务成功率、Schema 校验率、人工评分
+  \item 成本：命中/未命中输入、输出、搜索/抓取调用
+\end{itemize}
+\end{frame}
+\section{成本与安全}
+\begin{frame}{成本公式}
+模型费 = 缓存命中输入 $\times$ 对应单价 + 未命中输入 $\times$ 单价 + 输出 $\times$ 单价。Search/Fetch 按成功有结果的调用计费。\\[8pt]
+价格分时且会变化，应用只记录用量；账单服务从配置读取当前单价。
+\end{frame}
+\begin{frame}{成本控制杠杆}
+\begin{itemize}
+  \item 按任务路由 Flash/Pro 和思考强度
+  \item 限制输出、工具步数、搜索次数与输入历史
+  \item 稳定前缀提高缓存命中
+  \item 对租户/用户设置日预算和熔断
+  \item 质量评测后再降级，避免“便宜但无用”
+\end{itemize}
+\end{frame}
+\begin{frame}{密钥与数据安全}
+服务端持有 Key；最小权限、定期轮换、泄漏即吊销。提示与网页防注入；工具执行器做授权；日志脱敏；上传文件设生命周期；数据保留遵循业务和法规。
+\end{frame}
+\begin{frame}{上线检查清单}
+\begin{itemize}
+  \item 有界重试、熔断、限流、超时、取消
+  \item 全部分支处理 finish reason / 终止事件
+  \item Schema 与工具参数本地校验
+  \item 指标、告警、预算和降级开关
+  \item 负载、故障、注入、权限与数据恢复演练
+\end{itemize}
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_resilient\_chat.py}：分类重试与抖动退避
+  \item \api{02\_bounded\_parallel.py}：本地并发上限
+  \item \api{03\_observable\_request.py}：脱敏结构化指标
+\end{enumerate}
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/error_codes}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/rate_limit}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/pricing}\\
+\url{https://api-docs.deepseek.com/zh-cn/guides/kv_cache}
+\end{frame}
+\end{document}

@@ -1,0 +1,120 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第3课：流式输出、用量与上下文缓存}
+\subtitle{SSE、保活、Token 账本与缓存命中}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 正确消费 Chat Completions 的 SSE 增量
+  \item 识别正文、结束标记、保活与异常中断
+  \item 读取流式 usage 并统计缓存命中
+  \item 设计更容易命中 KV Cache 的上下文
+\end{itemize}
+\end{frame}
+\section{流式协议}
+\begin{frame}{为什么流式}
+\begin{itemize}
+  \item 降低首字等待，提升长回答的交互体验
+  \item 可逐步渲染，也可让用户主动取消
+  \item 不降低总生成时间或 Token 费用
+  \item 客户端需要处理半包、空增量和异常断开
+\end{itemize}
+\end{frame}
+\begin{frame}{Chat SSE 生命周期}
+\centering
+HTTP 200 $\rightarrow$ role chunk $\rightarrow$ content/reasoning chunks\\
+$\rightarrow$ finish chunk + usage $\rightarrow$ \api{data: [DONE]}
+\vspace{10pt}
+
+SDK 已解析 SSE；裸 HTTP 客户端需逐行处理 \api{data:}。
+\end{frame}
+\begin{frame}[fragile]{SDK 增量消费}
+\begin{lstlisting}[language=Python]
+stream = client.chat.completions.create(
+    model="deepseek-flash", messages=messages,
+    stream=True,
+    stream_options={"include_usage": True},
+)
+for chunk in stream:
+    if chunk.choices:
+        text = chunk.choices[0].delta.content or ""
+        print(text, end="", flush=True)
+    if chunk.usage:
+        usage = chunk.usage
+\end{lstlisting}
+\end{frame}
+\begin{frame}{保活与超时}
+等待推理开始期间：非流式可能持续返回空行；流式可能收到 \api{: keep-alive} SSE 注释。它们不是正文。\\[8pt]
+若 10 分钟仍未开始推理，服务器会关闭连接。连接超时、读取超时和总任务超时应分开设置。
+\end{frame}
+\begin{frame}{异常终止判断}
+\begin{itemize}
+  \item 收到 finish reason 和正常结束标记才算完整
+  \item 只得到部分文本后断开：标记为不完整，不静默展示
+  \item 自动重试可能重复生成或收费；先判断业务幂等性
+  \item UI 将“正在生成、已完成、被取消、失败”分开
+\end{itemize}
+\end{frame}
+\section{用量账本}
+\begin{frame}{usage 结构}
+\begin{description}
+  \item[\api{prompt\_tokens}] 总输入
+  \item[\api{completion\_tokens}] 总输出
+  \item[\api{total\_tokens}] 两者合计
+  \item[\api{prompt\_cache\_hit\_tokens}] 缓存命中输入
+  \item[\api{prompt\_cache\_miss\_tokens}] 未命中输入
+\end{description}
+流式请求需启用 \api{stream\_options.include\_usage}；最终块携带累计值。
+\end{frame}
+\begin{frame}{不要只记总 Token}
+建议日志字段：请求 ID、模型、模式、首 Token 延迟、总延迟、停止原因、输入/命中/未命中/输出 Token、重试次数。\\[8pt]
+不记录消息正文也可做成本与性能分析，避免日志泄露敏感数据。
+\end{frame}
+\section{上下文硬盘缓存}
+\begin{frame}{自动缓存原理}
+DeepSeek 自动缓存请求上下文的共同前缀，无需创建缓存对象。新请求从头与已有缓存匹配，前缀相同部分可命中。\\[8pt]
+缓存命中影响价格与吞吐，不保证输出一致；采样仍可能产生不同回答。
+\end{frame}
+\begin{frame}{提高命中率}
+\begin{itemize}
+  \item 稳定内容放前面：system、固定知识、工具定义
+  \item 易变内容放后面：用户问题、时间、请求 ID
+  \item 保持序列化稳定；不要无意义改变空格、顺序或模板版本
+  \item 不为命中率牺牲用户隔离或上下文正确性
+\end{itemize}
+\end{frame}
+\begin{frame}{两类典型命中}
+\begin{block}{多轮聊天}
+下一轮以完整上一轮为前缀，历史部分可命中。
+\end{block}
+\begin{block}{长文问答}
+同一长文放在问题之前，多次提问共享文档前缀。
+\end{block}
+通过 usage 观察，不凭主观延迟判断。
+\end{frame}
+\begin{frame}{流式与缓存常见误区}
+\begin{itemize}
+  \item 将每个 chunk 当完整 JSON 回答
+  \item 忘记空字符串或空 choices
+  \item 把 keep-alive 渲染给用户
+  \item 中断后无条件重发
+  \item 为缓存把不同用户数据混进同一前缀
+\end{itemize}
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_stream\_chat.py}：增量、结束与 usage
+  \item \api{02\_cache\_metrics.py}：同前缀两次请求的命中对比
+\end{enumerate}
+练习：记录首 Token 时间，并在异常断开时丢弃或标记半成品。
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/api/create-chat-completion}\\
+\url{https://api-docs.deepseek.com/zh-cn/guides/kv_cache}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/rate_limit}
+\end{frame}
+\end{document}

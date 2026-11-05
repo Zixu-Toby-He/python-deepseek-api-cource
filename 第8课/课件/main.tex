@@ -1,0 +1,126 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第8课：Files API}
+\subtitle{上传、分页、引用、过期与删除}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 管理图片文件的完整生命周期
+  \item 在 Chat 中复用 file\_id
+  \item 掌握配额、分页、过期和账号归属
+  \item 区分 OpenAI 与 Anthropic 兼容 Files API
+\end{itemize}
+\end{frame}
+\section{生命周期}
+\begin{frame}{何时用 Files API}
+\begin{itemize}
+  \item 同一图片要在多个请求中复用
+  \item 内联请求会超过 48 MiB
+  \item 图片超过 32 MiB、但不超过 64 MiB
+  \item 希望上传与推理解耦
+\end{itemize}
+当前仅支持图片：JPEG、PNG、GIF、WebP。
+\end{frame}
+\begin{frame}{四个 OpenAI 兼容端点}
+\begin{description}
+  \item[POST /files] multipart 上传
+  \item[GET /files] 分页列出
+  \item[GET /files/\{id\}] 查询元数据
+  \item[DELETE /files/\{id\}] 删除
+\end{description}
+file\_id 形如 \api{file-api-...}。
+\end{frame}
+\begin{frame}{上传字段}
+\begin{itemize}
+  \item \api{file}：必填，最大 64 MiB
+  \item \api{purpose=user\_data}：必填
+  \item \api{expires\_after[anchor]=created\_at}
+  \item \api{expires\_after[seconds]}：3600--2592000
+\end{itemize}
+不传过期字段则永久有效；上传需在 10 分钟内完成。
+\end{frame}
+\begin{frame}[fragile]{上传与引用}
+\begin{lstlisting}[language=Python]
+with open("image.jpg", "rb") as handle:
+    uploaded = client.files.create(
+        file=handle, purpose="user_data")
+
+content = [
+  {"type": "text", "text": "分析图片"},
+  {"type": "file", "file_id": uploaded.id},
+]
+\end{lstlisting}
+文件属于账号，同账号所有 API Key 和 API 家族可共享。
+\end{frame}
+\section{列表与治理}
+\begin{frame}{分页参数}
+\begin{description}
+  \item[after] file\_id 游标
+  \item[limit] 1--1000
+  \item[order] asc（默认）或 desc
+  \item[purpose] 仅 user\_data
+\end{description}
+响应包含 data、first\_id、last\_id、has\_more。
+\end{frame}
+\begin{frame}{文件对象}
+\begin{itemize}
+  \item id、object、bytes、created\_at、filename、purpose
+  \item 只有设置过期时才出现 expires\_at
+  \item 文件名最长 512 字节
+  \item 单用户最多 25 GiB、10000 个文件
+\end{itemize}
+上传成功后应持久化 file\_id 与业务资源的映射。
+\end{frame}
+\begin{frame}{清理策略}
+\begin{itemize}
+  \item 临时任务设置到期时间
+  \item 业务删除时同步删除远端文件
+  \item 定期分页审计孤儿文件与容量
+  \item 删除是破坏性操作：先校验归属和引用计数
+\end{itemize}
+\end{frame}
+\section{内容块与兼容}
+\begin{frame}{file 块的两种来源}
+\begin{itemize}
+  \item \api{file\_id}：引用已上传文件
+  \item \api{file\_data}：data URL 内联；可配 filename
+\end{itemize}
+file\_id 与 file\_data 互斥；filename 不能与 file\_id 同时出现。
+\end{frame}
+\begin{frame}{Anthropic 兼容差异}
+\small
+所有请求需 \api{anthropic-beta: files-api-2025-04-14}。裸 HTTP 路径为 \api{/anthropic/v1/files}。
+\begin{itemize}
+  \item 游标：after\_id / before\_id（互斥），默认 limit=20
+  \item 无 order/purpose；大小字段为 size\_bytes
+  \item type 替代 object；created\_at 为 RFC 3339
+  \item 删除返回 type=file\_deleted
+\end{itemize}
+\end{frame}
+\begin{frame}{失败与安全}
+\begin{itemize}
+  \item 上传前检查真实格式、大小与业务授权
+  \item 不信任用户文件名；展示时转义
+  \item 对 413 不重试原请求，应压缩或改方案
+  \item file\_id 不是公开 URL，但仍属于敏感业务标识
+\end{itemize}
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_file\_lifecycle.py}：上传/查询/列表/可选删除
+  \item \api{02\_file\_vision.py}：file\_id 视觉问答
+\end{enumerate}
+删除需显式传 \api{--delete}，防止演示误删。
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/guides/files_api}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/create-file}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/list-files}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/retrieve-file}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/delete-file}
+\end{frame}
+\end{document}

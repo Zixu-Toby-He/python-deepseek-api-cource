@@ -1,0 +1,134 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第1课：认识 DeepSeek API 与首次调用}
+\subtitle{从账号、鉴权到第一个可观测请求}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 理解 API、模型、Token、SDK 的关系
+  \item 安全配置 API Key，并分别用 HTTP 与 OpenAI SDK 调用
+  \item 选择 \api{deepseek-flash} / \api{deepseek-v4-pro}
+  \item 查询模型、余额并读懂最小响应
+\end{itemize}
+\end{frame}
+\begin{frame}{全课程能力阶梯}
+\centering
+鉴权与对话 $\rightarrow$ 流式与推理 $\rightarrow$ 结构化与工具\\[6pt]
+$\rightarrow$ 视觉/文件/搜索 $\rightarrow$ 多协议兼容 $\rightarrow$ 生产 Agent
+\end{frame}
+\section{基本概念}
+\begin{frame}{一次调用的组成}
+\begin{block}{请求}
+端点 + Bearer Key + 模型 + 输入消息 + 生成参数
+\end{block}
+\begin{block}{响应}
+候选结果 + 停止原因 + Token 用量 + 请求标识
+\end{block}
+DeepSeek API 是\keypoint{无状态}服务：客户端负责保存需要延续的对话。
+\end{frame}
+\begin{frame}{当前模型选择}
+\begin{tabular}{lll}
+\toprule
+模型 & 主要定位 & 图像输入\\
+\midrule
+\api{deepseek-flash} & 速度、成本、视觉 & 支持\\
+\api{deepseek-v4-pro} & 高质量复杂任务 & 不支持\\
+\bottomrule
+\end{tabular}
+\vspace{8pt}
+
+两者支持 1M 上下文、思考模式、JSON、工具、Responses 与 Anthropic 格式。能力和价格会更新，应以官方模型页为准。
+\end{frame}
+\begin{frame}{地址与兼容层}
+\begin{description}
+  \item[OpenAI 格式] \api{https://api.deepseek.com}
+  \item[Anthropic 格式] \api{https://api.deepseek.com/anthropic}
+  \item[Beta 功能] \api{https://api.deepseek.com/beta}
+\end{description}
+“兼容”表示可复用 SDK 与请求形态，不代表所有上游字段都生效。第10、11课逐项核对差异。
+\end{frame}
+\section{鉴权与环境}
+\begin{frame}[fragile]{Key 只放环境变量}
+\begin{lstlisting}[language=bash]
+# PowerShell：仅当前终端会话
+$env:DEEPSEEK_API_KEY="sk-..."
+$env:DEEPSEEK_MODEL="deepseek-flash"
+\end{lstlisting}
+\begin{alertblock}{禁止}
+不要提交 Key、打印 Key、放进前端、日志或示例截图；泄漏后立即吊销并轮换。
+\end{alertblock}
+\end{frame}
+\begin{frame}{HTTP 鉴权}
+\api{Authorization: Bearer <API\_KEY>}\\[8pt]
+JSON 请求还需 \api{Content-Type: application/json}。常见失败：
+\begin{itemize}
+  \item 401：Key 缺失、拼写错误、已失效
+  \item 402：余额不足
+  \item 400/422：JSON 或字段不合法
+\end{itemize}
+\end{frame}
+\section{首次调用}
+\begin{frame}[fragile]{OpenAI SDK 最小调用}
+\begin{lstlisting}[language=Python]
+client = OpenAI(
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    base_url="https://api.deepseek.com",
+)
+response = client.chat.completions.create(
+    model="deepseek-flash",
+    messages=[{"role": "user", "content": "你好"}],
+    max_tokens=64,
+)
+print(response.choices[0].message.content)
+\end{lstlisting}
+\end{frame}
+\begin{frame}{最小响应阅读法}
+\begin{description}
+  \item[\api{id}] 请求/结果标识，排障时记录
+  \item[\api{choices[0].message}] 助手消息
+  \item[\api{finish\_reason}] stop、length、tool\_calls 等
+  \item[\api{usage}] 输入、输出、总 Token 与缓存明细
+  \item[\api{system\_fingerprint}] 后端配置指纹
+\end{description}
+先检查停止原因，再消费内容，最后记录 usage。
+\end{frame}
+\begin{frame}{模型与余额端点}
+\begin{itemize}
+  \item \api{GET /models}：运行时发现模型及能力元数据
+  \item \api{GET /user/balance}：读取余额可用状态与币种明细
+  \item 余额是账号级；模型列表适合健康检查，不应每请求查询
+\end{itemize}
+\end{frame}
+\section{成本与练习}
+\begin{frame}{Token 与计费直觉}
+总费用通常由\keypoint{未命中输入、缓存命中输入、输出}分别计价；Search/Fetch 按成功请求次数计费。\\[8pt]
+实际 Token 以响应 \api{usage} 为准；中文字符、英文单词与 Token 并非固定一一对应。
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_first\_call.py}：SDK 最小调用与 usage
+  \item \api{02\_raw\_http.py}：理解裸 HTTP 请求
+  \item \api{03\_account\_info.py}：模型列表与余额
+\end{enumerate}
+练习：比较两个模型的延迟、输出与 Token；不要把单次结果当成基准测试。
+\end{frame}
+\begin{frame}{检查清单}
+\begin{itemize}
+  \item Key 未进入源码或版本库
+  \item 显式设置超时与 \api{max\_tokens}
+  \item 记录 id、model、finish\_reason、usage
+  \item 不硬编码价格；上线前复核官方页面
+\end{itemize}
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/pricing}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/token_usage}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/list-models}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/get-user-balance}
+\end{frame}
+\end{document}

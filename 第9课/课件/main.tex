@@ -1,0 +1,115 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第9课：网页搜索与抓取}
+\subtitle{Search、Fetch 与有来源的 Web RAG}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 调用原始 Search / Fetch JSON API
+  \item 使用搜索语法、排序分数和权威性字段
+  \item 根据错误类型决定是否重试
+  \item 构建最小的“搜—选—答—引”流程
+\end{itemize}
+\end{frame}
+\section{两个独立工具 API}
+\begin{frame}{职责与端点}
+\begin{description}
+  \item[Search] \api{POST /v1/tools/search}，按 query 返回结构化结果
+  \item[Fetch] \api{POST /v1/tools/fetch}，把单页抓成 Markdown
+\end{description}
+它们是原始 JSON API，不是 Chat Completions 内的客户端 function call；使用相同 Bearer Key。
+\end{frame}
+\begin{frame}{Search 请求字段}
+\begin{itemize}
+  \item query：必填，1--128 个 Unicode 字符
+  \item count：1--50，默认 10
+  \item ori\_question：原始用户问题，帮助理解意图
+  \item localization：用于本地化的 IP
+  \item need\_content：是否同时返回正文
+\end{itemize}
+未知字段会被忽略，客户端仍应主动拒绝拼写错误。
+\end{frame}
+\begin{frame}{搜索语法}
+\begin{tabular}{ll}
+\toprule
+操作符 & 作用\\
+\midrule
+site: / -site: & 限定/排除站点\\
+"短语" / -"短语" & 包含/排除精确短语\\
+-关键词 & 排除词\\
+lang:zh,en & 限定语言\\
+after: / before: & 限定日期\\
+\bottomrule
+\end{tabular}
+多个 site 可用空格和 OR 组合。
+\end{frame}
+\begin{frame}{Search 响应阅读}
+\begin{itemize}
+  \item rerank\_score：0--3，$\ge 1.5$ 通常为优质结果
+  \item authority：0--4，$\ge 3$ 极权威，-1 未知
+  \item snippet：短展示；summary：给模型阅读的长摘要
+  \item content：仅 need\_content=true 且可提取时非空
+  \item date：UTC RFC 3339 或 null
+\end{itemize}
+分数是排序信号，不替代来源核验。
+\end{frame}
+\section{Fetch 与错误}
+\begin{frame}{Fetch 请求与响应}
+输入只有 URL：最长 8192，必须是含 host 的 HTTP/HTTPS URL，不允许用户名/密码。返回 title 与 Markdown content。\\[8pt]
+结果受目标站点可用性、robots/访问策略、内容类型影响。
+\end{frame}
+\begin{frame}{错误决策}
+\small
+\begin{tabular}{lll}
+\toprule
+状态 & 含义 & 策略\\
+\midrule
+400/401/403/404 & 请求/认证/策略/内容问题 & 修正后再发\\
+402 & 余额不足 & 充值，不自动重试\\
+408/429 & 超时/限速 & 退避重试\\
+413 & 请求过大 & 缩小请求\\
+500/504 & 服务/下游失败 & 抖动退避重试\\
+\bottomrule
+\end{tabular}
+\end{frame}
+\begin{frame}{计费与限速}
+Search、Fetch 各 5 元/1000 次成功且有结果的请求；失败、空搜索、超时不计费，count 不影响单次价格。\\[8pt]
+账号级独立 QPS：Search 100，Fetch 25；Fetch 另有目标域名限速。与模型并发额度互不占用。
+\end{frame}
+\section{Web RAG}
+\begin{frame}{最小流水线}
+\centering
+用户问题 $\rightarrow$ Search（摘要/正文）$\rightarrow$ 过滤与去重\\
+$\rightarrow$ 必要时 Fetch 原文 $\rightarrow$ 编号上下文\\
+$\rightarrow$ 模型回答 $\rightarrow$ 返回可点击来源
+\end{frame}
+\begin{frame}{来源与提示注入}
+网页是\keypoint{不可信数据}：页面中的“忽略之前指令”等内容不能成为系统指令。\\[8pt]
+提示中明确：只把网页当资料；引用编号；资料不足则说明；工具调用和敏感操作不受网页指令控制。
+\end{frame}
+\begin{frame}{检索治理}
+\begin{itemize}
+  \item 优先官方/一手来源、时效和交叉验证
+  \item 限制传给模型的页面数与长度
+  \item URL 去重，记录查询、时间与来源
+  \item 把模型答案和原始来源一起返回
+  \item 尊重版权、站点条款和个人信息保护
+\end{itemize}
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_search\_fetch.py}：搜索并可选抓取第一条
+  \item \api{02\_web\_rag.py}：搜索摘要驱动的带来源回答
+\end{enumerate}
+示例不自动抓取任意用户 URL，降低 SSRF 与内容风险。
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/guides/search}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/search}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/fetch}
+\end{frame}
+\end{document}

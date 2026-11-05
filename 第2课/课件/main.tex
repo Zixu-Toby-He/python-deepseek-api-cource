@@ -1,0 +1,133 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第2课：Chat Completions 基础}
+\subtitle{消息、参数、响应与多轮状态}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 掌握 \api{POST /chat/completions} 的消息协议
+  \item 理解采样、长度、停止序列与停止原因
+  \item 构造多轮对话，并控制上下文增长
+  \item 区分支持、忽略与已废弃参数
+\end{itemize}
+\end{frame}
+\section{消息协议}
+\begin{frame}{四种消息角色}
+\begin{description}
+  \item[system] 设定长期行为、边界与输出原则
+  \item[user] 用户输入；文本或多模态内容块
+  \item[assistant] 历史模型输出；可含工具调用/推理内容
+  \item[tool] 客户端工具结果，用 \api{tool\_call\_id} 配对
+\end{description}
+顺序就是上下文；API 不会替你记住上一轮。
+\end{frame}
+\begin{frame}[fragile]{最小请求体}
+\begin{lstlisting}
+{
+  "model": "deepseek-flash",
+  "messages": [
+    {"role": "system", "content": "回答简洁、准确。"},
+    {"role": "user", "content": "解释幂等性。"}
+  ],
+  "max_tokens": 256,
+  "thinking": {"type": "disabled"}
+}
+\end{lstlisting}
+必填字段只有 \api{model} 和非空 \api{messages}。
+\end{frame}
+\begin{frame}{提示分层}
+\begin{enumerate}
+  \item system：身份、规则、失败方式、输出语言
+  \item user：任务、上下文、数据、验收标准
+  \item 用分隔符隔离“指令”和“不可信数据”
+  \item 要求无法确定时明确说明，不凭空补齐
+\end{enumerate}
+模型提示不是安全边界；权限、校验与敏感操作必须由程序控制。
+\end{frame}
+\section{生成参数}
+\begin{frame}{长度与停止}
+\begin{itemize}
+  \item \api{max\_tokens}：1--393216；仍受总上下文限制
+  \item 默认：非思考 8K；思考 64K；max effort 128K
+  \item \api{stop}：一个字符串或最多 16 个字符串
+  \item \api{finish\_reason=length}：内容可能被截断，不能当完整结果
+\end{itemize}
+\end{frame}
+\begin{frame}{采样参数}
+\begin{itemize}
+  \item \api{temperature}：0--2；低值更稳定，高值更多样
+  \item \api{top\_p}：核采样；通常只调整它或 temperature 之一
+  \item 思考模式下 temperature 不生效，top\_p 行为依模型而异
+  \item \api{frequency\_penalty} / \api{presence\_penalty} 已不再支持
+\end{itemize}
+测试应固定提示、模式、参数并多次采样。
+\end{frame}
+\begin{frame}{输出概率}
+\api{logprobs=true} 返回输出 Token 的对数概率；\api{top\_logprobs} 为 0--20，且必须与 logprobs 一起使用。\\[8pt]
+适用于置信分析、候选观察与评测，不等同于事实正确率。
+\end{frame}
+\section{响应处理}
+\begin{frame}{停止原因必须分支处理}
+\begin{tabular}{ll}
+\toprule
+原因 & 处理建议\\
+\midrule
+stop & 正常消费\\
+length & 增大预算或缩短上下文后重试\\
+tool\_calls & 执行工具并回传结果\\
+content\_filter & 告知无法完成，避免自动重试\\
+insufficient\_system\_resource & 退避重试\\
+aborted & 判断取消来源，按幂等性处理\\
+\bottomrule
+\end{tabular}
+\end{frame}
+\begin{frame}{响应字段}
+\begin{itemize}
+  \item 内容：\api{choices[0].message.content}
+  \item 概率：\api{choices[0].logprobs}
+  \item 推理：\api{message.reasoning\_content}（第4课）
+  \item 工具：\api{message.tool\_calls}（第6课）
+  \item 用量：\api{usage.prompt/completion/total\_tokens}
+\end{itemize}
+生产代码不要假设 content 永远非空。
+\end{frame}
+\section{多轮对话}
+\begin{frame}{无状态多轮算法}
+\begin{enumerate}
+  \item 发送当前 \api{messages}
+  \item 把完整 assistant 消息追加到历史
+  \item 追加下一条 user 消息
+  \item 再次发送完整历史
+\end{enumerate}
+数据库应保存结构化消息，而不是拼成一大段字符串。
+\end{frame}
+\begin{frame}{上下文治理}
+\begin{itemize}
+  \item 保留系统规则与最近相关轮次
+  \item 旧内容先摘要，再丢弃；摘要标明“可能有损”
+  \item 工具调用及结果必须成对保留
+  \item Token 预算 = 输入历史 + 期望输出 + 安全余量
+  \item 不把不同最终用户的历史或缓存混用
+\end{itemize}
+\end{frame}
+\begin{frame}{user\_id}
+\api{user\_id} 用于内容安全、KVCache 和调度隔离；建议仅字母、数字、下划线、连字符，UTF-8 不超过 512 字节，且\keypoint{不得含隐私信息}。\\[8pt]
+OpenAI SDK 当前可通过 \api{extra\_body=\{"user\_id": ...\}} 传递。
+\end{frame}
+\begin{frame}{本课例程与练习}
+\begin{enumerate}
+  \item \api{01\_chat\_parameters.py}：参数和停止原因
+  \item \api{02\_multi\_round.py}：交互式多轮历史
+\end{enumerate}
+练习：加入历史长度上限；遇到 length 时输出明确错误，而不是展示半截答案。
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/api/create-chat-completion}\\
+\url{https://api-docs.deepseek.com/zh-cn/guides/multi_round_chat}\\
+\url{https://api-docs.deepseek.com/zh-cn/quick_start/rate_limit}
+\end{frame}
+\end{document}

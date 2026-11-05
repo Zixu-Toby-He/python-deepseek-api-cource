@@ -1,0 +1,121 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第6课：Tool Calls}
+\subtitle{让模型规划，让程序执行}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 定义 function 工具与 JSON Schema 参数
+  \item 完成“模型请求工具—程序执行—结果回传”循环
+  \item 处理多个工具调用、错误与安全边界
+  \item 在思考模式和 strict 模式下正确工作
+\end{itemize}
+\end{frame}
+\section{工具协议}
+\begin{frame}{职责边界}
+模型只生成工具名称与 JSON 参数；\keypoint{不会自动执行客户端函数}。程序负责校验、授权、执行、超时、审计，再以 tool 消息回传结果。
+\begin{alertblock}{安全原则}
+工具参数是不可信输入；模型不能替代权限检查或业务确认。
+\end{alertblock}
+\end{frame}
+\begin{frame}{工具定义}
+每个工具包含：
+\begin{itemize}
+  \item \api{type: function}
+  \item 唯一的 \api{function.name}
+  \item 清晰的 \api{description}
+  \item \api{parameters}：JSON Schema
+\end{itemize}
+工具少而专一，名称稳定，描述写清“何时调用”和参数单位。
+\end{frame}
+\begin{frame}[fragile]{最小 Schema}
+\begin{lstlisting}
+{"type": "function", "function": {
+  "name": "get_weather",
+  "description": "查询指定城市天气",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "city": {"type": "string"}
+    },
+    "required": ["city"],
+    "additionalProperties": false
+  }
+}}
+\end{lstlisting}
+\end{frame}
+\begin{frame}{tool\_choice}
+\begin{description}
+  \item[auto] 模型决定是否调用（默认语义）
+  \item[none] 禁止工具；即使提供 tools 也不启用
+  \item[required] 必须至少调用一个
+  \item[指定函数] 强制特定函数；思考模式兼容性需留意
+\end{description}
+不要用 required 强迫不必要的外部操作。
+\end{frame}
+\section{执行循环}
+\begin{frame}{标准闭环}
+\centering
+user + tools $\rightarrow$ assistant.tool\_calls\\
+$\rightarrow$ 校验并执行每个调用\\
+$\rightarrow$ tool 消息（按 id 配对）$\rightarrow$ 再请求\\
+$\rightarrow$ assistant.content
+\end{frame}
+\begin{frame}{消息顺序不可破坏}
+\begin{enumerate}
+  \item 原样追加包含 tool\_calls 的 assistant 消息
+  \item 对每个调用追加一个 role=tool 消息
+  \item \api{tool\_call\_id} 必须匹配
+  \item 所有结果到齐后再让模型继续
+\end{enumerate}
+并行调用可以并行执行，但结果仍须完整回传。
+\end{frame}
+\begin{frame}{执行器防线}
+\begin{itemize}
+  \item 名称白名单；拒绝未知工具
+  \item JSON 解析 + Schema/类型/范围校验
+  \item 身份与资源权限检查
+  \item 网络、文件、数据库超时与配额
+  \item 写操作需要幂等键；高风险操作二次确认
+  \item 返回最小必要数据，错误也结构化
+\end{itemize}
+\end{frame}
+\section{思考与严格模式}
+\begin{frame}{思考模式的关键规则}
+请求只要携带 tools，历史 assistant 的 \api{reasoning\_content} 必须完整回传，即使某轮没有调用工具。直接追加 SDK 返回的完整 message 最稳妥。\\[8pt]
+循环需设最大步数，防止模型反复调用。
+\end{frame}
+\begin{frame}{strict 模式（Beta）}
+在 function 定义设置 \api{strict: true}，可增强参数对 Schema 的遵循。支持 object、string、number/integer、array、enum、anyOf、\api{\$ref}/\api{\$defs} 的受限子集。\\[8pt]
+仍然必须在本地校验；“结构正确”不代表“操作安全”。
+\end{frame}
+\begin{frame}{Schema 设计建议}
+\begin{itemize}
+  \item object 列出 required，关闭 additionalProperties
+  \item 枚举优于自由文本；数值设置上下界
+  \item 避免深层嵌套与语义重叠的 anyOf
+  \item 不让模型直接生成 SQL、Shell 或任意路径
+  \item 版本化工具定义与执行器
+\end{itemize}
+\end{frame}
+\begin{frame}{失败路径}
+工具失败可回传结构化错误，让模型解释或换策略；但认证失败、权限拒绝、危险参数不应自动放宽规则。\\[8pt]
+记录 tool name、call id、参数摘要、耗时、状态；敏感参数脱敏。
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_tool\_loop.py}：非思考模式完整闭环
+  \item \api{02\_thinking\_tools.py}：思考模式与完整消息回传
+  \item \api{03\_strict\_tool.py}：严格参数 Schema
+\end{enumerate}
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/guides/tool_calls}\\
+\url{https://api-docs.deepseek.com/zh-cn/guides/thinking_mode}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/create-chat-completion}
+\end{frame}
+\end{document}

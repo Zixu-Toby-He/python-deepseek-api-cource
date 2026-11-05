@@ -1,0 +1,122 @@
+\documentclass[aspectratio=169,UTF8]{ctexbeamer}
+\input{../../beamer-common.tex}
+\title{第4课：思考模式}
+\subtitle{推理强度、reasoning\_content 与多轮规则}
+\author{DeepSeek API 全栈课程}
+\date{文档快照：2026-11-05}
+\begin{document}
+\frame{\titlepage}
+\begin{frame}{学习目标}
+\begin{itemize}
+  \item 切换思考/非思考模式并设置推理强度
+  \item 分离推理内容与最终回答
+  \item 正确处理流式推理和多轮历史
+  \item 理解工具存在时的特殊回传要求
+\end{itemize}
+\end{frame}
+\section{控制方式}
+\begin{frame}{默认行为}
+当前模型默认开启思考模式，默认 effort 为 \api{high}。简单抽取、格式转换、低延迟交互可显式关闭；复杂推理、规划、代码分析可开启。\\[8pt]
+思考更强通常意味着更高延迟与更多输出 Token，并非所有任务都更好。
+\end{frame}
+\begin{frame}{OpenAI Chat 两组参数}
+\begin{itemize}
+  \item 开关：\api{thinking.type = enabled/disabled}
+  \item 强度：\api{reasoning\_effort = low/high/max}
+  \item thinking 优先；省略时由 effort 决定
+  \item \api{reasoning\_effort=none} 可关闭
+\end{itemize}
+SDK 中 thinking 通过 \api{extra\_body} 传入。
+\end{frame}
+\begin{frame}{跨协议映射}
+\begin{tabular}{lll}
+\toprule
+协议 & 开关 & 强度\\
+\midrule
+Chat & thinking.type & reasoning\_effort\\
+Anthropic & thinking.type & output\_config.effort\\
+Responses & reasoning.effort & reasoning.effort\\
+\bottomrule
+\end{tabular}
+\vspace{6pt}
+
+minimal$\rightarrow$low；medium/xhigh$\rightarrow$high；ultra$\rightarrow$max。
+\end{frame}
+\begin{frame}[fragile]{显式开启}
+\begin{lstlisting}[language=Python]
+response = client.chat.completions.create(
+    model="deepseek-flash",
+    messages=messages,
+    reasoning_effort="high",
+    extra_body={"thinking": {"type": "enabled"}},
+)
+reasoning = response.choices[0].message.reasoning_content
+answer = response.choices[0].message.content
+\end{lstlisting}
+\end{frame}
+\section{参数与输出}
+\begin{frame}{思考模式下的参数}
+\begin{itemize}
+  \item temperature、presence/frequency penalty 不生效
+  \item Flash：top\_p 有效范围 0.95--1；非思考时恒为 1
+  \item Pro：思考时忽略 top\_p；工具启用为 0.95，否则 1
+  \item max\_tokens 同时容纳推理与回答，预算不足会截断
+\end{itemize}
+兼容层可能静默接受但忽略参数，不能仅以“未报错”判断生效。
+\end{frame}
+\begin{frame}{两条输出通道}
+\begin{description}
+  \item[reasoning\_content] 模型推理文本
+  \item[content] 面向用户的最终回答
+\end{description}
+产品界面可只展示最终答案；日志与存储应遵循隐私、安全和产品政策。不要把思维链当可验证证据。
+\end{frame}
+\begin{frame}{流式拼接}
+同一流中 delta 可能携带 reasoning 或 content。分别累积，不要用 \api{else} 假定两者永不同时出现；字段为空是正常情况。\\[8pt]
+最终块检查 finish reason 与 usage，再将结果标记完成。
+\end{frame}
+\section{多轮规则}
+\begin{frame}{不带 tools 的多轮}
+历史 \api{reasoning\_content} 无需回传；即使传入也会被忽略，不拼入上下文。保存 assistant 的最终 content 即可延续普通聊天。\\[8pt]
+这减少历史体积，也避免把推理文本误当用户可见事实。
+\end{frame}
+\begin{frame}{带 tools 的多轮}
+只要请求携带 \api{tools}，后续请求必须完整回传每轮 assistant 的 \api{reasoning\_content}，即使该轮没有实际工具调用；否则可能返回 400。\\[8pt]
+最安全做法：原样追加 SDK 返回的完整 assistant message。
+\end{frame}
+\begin{frame}{模式选择策略}
+\begin{tabular}{ll}
+\toprule
+任务 & 建议\\
+\midrule
+分类、抽取、改写 & disabled / none\\
+普通问答 & low 或 high，按评测选择\\
+数学、复杂代码、规划 & high / max\\
+实时 UI & 流式 + 合理 effort\\
+\bottomrule
+\end{tabular}
+用质量、P95 延迟、Token 与失败率共同评估。
+\end{frame}
+\begin{frame}{常见错误}
+\begin{itemize}
+  \item 默认开启却误以为是普通快速模式
+  \item 只打印 content，误判流式“长时间无输出”
+  \item 为推理设置过小 max\_tokens
+  \item 带工具时丢掉 reasoning\_content
+  \item 把推理文本视为来源或审计证明
+\end{itemize}
+\end{frame}
+\begin{frame}{本课例程}
+\begin{enumerate}
+  \item \api{01\_thinking.py}：非流式双通道
+  \item \api{02\_thinking\_stream.py}：流式分离推理与回答
+  \item \api{03\_thinking\_multi\_turn.py}：不带工具的多轮
+\end{enumerate}
+第6课再实现带工具的完整回传循环。
+\end{frame}
+\begin{frame}{官方资料}
+\small
+\url{https://api-docs.deepseek.com/zh-cn/guides/thinking_mode}\\
+\url{https://api-docs.deepseek.com/zh-cn/api/create-chat-completion}
+\end{frame}
+\end{document}
